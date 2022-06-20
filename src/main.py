@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
@@ -16,6 +17,13 @@ def _parse_run_arguments():
 
     # Add available command arguments
     parser.add_argument('path', type=Path, help='Image file path (only PNG supported)')
+    parser.add_argument(
+        '--format',
+        required=False,
+        choices=('text', 'json'),
+        default='text',
+        help='Specify output data format (text or json)',
+    )
 
     return parser.parse_args()
 
@@ -45,7 +53,12 @@ if __name__ == '__main__':
     args = _parse_run_arguments()
     _validate_image_type(args.path)
 
-    print(_invoke_recognition(Path(args.path)))
+    recognition_result = _invoke_recognition(Path(args.path))
 
-
-
+    if args.format == 'text':
+        print(recognition_result)
+    else:
+        body = {
+           'text': recognition_result,
+        }
+        print(json.dumps(body))

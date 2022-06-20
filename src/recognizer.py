@@ -400,4 +400,4 @@ def predict_single_object(path, model):
     image = list(prepare_dataset([path], ['']))[0]['image']
     predictions = model.predict(image)
 
-    return decode_batch_predictions(predictions, max_label_length, num_to_char_converter)
+    return decode_batch_predictions(predictions, max_label_length, num_to_char_converter)[0]
