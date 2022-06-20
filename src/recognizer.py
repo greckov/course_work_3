@@ -8,6 +8,8 @@ import tensorflow as tf
 import numpy as np
 import os
 
+import layers
+
 # Recognition constants
 BATCH_SIZE = 64
 PADDING_TOKEN = 99
@@ -35,21 +37,15 @@ def _split_dataset(base_dir):
 
     np.random.shuffle(words_list)
 
-    """split the dataset into three subsets with a 90:5:5 ratio (train:validation:test)."""
+    """split the dataset into three subsets with a 95:5 ratio (train:validation)."""
 
-    split_idx = int(0.9 * len(words_list))
+    split_idx = int(0.95 * len(words_list))
     train_samples = words_list[:split_idx]
-    test_samples = words_list[split_idx:]
+    validation_samples = words_list[split_idx:]
 
-    val_split_idx = int(0.5 * len(test_samples))
-    validation_samples = test_samples[:val_split_idx]
-    test_samples = test_samples[val_split_idx:]
+    assert len(words_list) == len(train_samples) + len(validation_samples)
 
-    assert len(words_list) == len(train_samples) + len(validation_samples) + len(
-        test_samples
-    )
-
-    return train_samples, validation_samples, test_samples
+    return train_samples, validation_samples
 
 
 def get_image_paths_and_labels(base_dir, samples):
@@ -137,25 +133,6 @@ def decode_batch_predictions(pred, num_to_char, max_len):
     return output_text
 
 
-class CTCLayer(keras.layers.Layer):
-    def __init__(self, name=None, **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.loss_fn = keras.backend.ctc_batch_cost
-
-    def call(self, y_true, y_pred):
-        batch_len = tf.cast(tf.shape(y_true)[0], dtype="int64")
-        input_length = tf.cast(tf.shape(y_pred)[1], dtype="int64")
-        label_length = tf.cast(tf.shape(y_true)[1], dtype="int64")
-
-        input_length = input_length * tf.ones(shape=(batch_len, 1), dtype="int64")
-        label_length = label_length * tf.ones(shape=(batch_len, 1), dtype="int64")
-        loss = self.loss_fn(y_true, y_pred, input_length, label_length)
-        self.add_loss(loss)
-
-        # At test time, just return the computed predictions.
-        return y_pred
-
-
 def preprocess_image(image_path, img_size=(IMAGE_WIDTH, IMAGE_HEIGHT)):
     image = tf.io.read_file(image_path)
     image = tf.image.decode_png(image, 1)
@@ -215,7 +192,7 @@ def build_model(char_to_num):
     )(x)
 
     # Add CTC layer for calculating CTC loss at each step.
-    output = CTCLayer(name="ctc_loss")(labels, x)
+    output = layers.CTCLayer(name="ctc_loss")(labels, x)
 
     # Define the model.
     model = keras.models.Model(
@@ -316,16 +293,14 @@ def get_trained_model():
 
     base_dir = 'resources/datasets/IAM_Words'
 
-    train_samples, validation_samples, test_samples = _split_dataset(base_dir)
+    train_samples, validation_samples = _split_dataset(base_dir)
 
     logger.debug(f"Total training samples: {len(train_samples)}")
     logger.debug(f"Total validation samples: {len(validation_samples)}")
-    logger.debug(f"Total test samples: {len(test_samples)}")
 
     # Prepare image paths
     train_img_paths, train_labels = get_image_paths_and_labels(base_dir, train_samples)
     validation_img_paths, validation_labels = get_image_paths_and_labels(base_dir, validation_samples)
-    test_img_paths, test_labels = get_image_paths_and_labels(base_dir, test_samples)
 
     # Find maximum length and the size of the vocabulary in the training data.
     train_labels_cleaned = []
@@ -345,9 +320,8 @@ def get_trained_model():
     logger.debug("Maximum length: ", max_label_length)
     logger.debug("Vocab size: ", len(characters))
 
-    # Now we clean the validation and the test labels as well
+    # Now we clean the validation labels as well
     validation_labels_cleaned = _clean_labels(validation_labels)
-    test_labels_cleaned = _clean_labels(test_labels)
 
     # Mapping characters to integers.
     char_to_num_converter = StringLookup(vocabulary=list(characters), mask_token=None)
@@ -358,7 +332,7 @@ def get_trained_model():
     )
 
     if os.path.exists(CACHED_MODEL_PATH):
-        model = load_model(CACHED_MODEL_PATH, custom_objects={'CTCLayer': CTCLayer})
+        model = load_model(CACHED_MODEL_PATH, custom_objects={'CTCLayer': layers.CTCLayer})
         return keras.models.Model(model.get_layer(name="image").input, model.get_layer(name="dense2").output)
 
     """## Prepare `tf.data.Dataset` objects"""
